@@ -71,11 +71,10 @@ private:
   // edm::EventSetup const&) override;
 
   // ----------member data ---------------------------
-  unsigned int minTracks_;
-  std::string tracks_;
-  std::string dEdxEstimator_;
+
+  double infinity = std::numeric_limits<double>::infinity();
   TTree *tree_;
-  int nTracks_;
+  unsigned int nTracks_;
   std::vector<double> dEdx_;
   std::vector<double> nHits_;
   std::vector<double> charge_;
@@ -91,6 +90,16 @@ private:
   //  std::vector<double> deltaR_2;
   std::vector<double> deltaEta_;
   std::vector<double> deltaPhi_;
+
+  // Cuts
+  unsigned int minTracks_;
+  std::string tracks_;
+  std::string dEdxEstimator_;
+  unsigned int nFoundHitsCut_;
+  double chi2Cut_;
+  double etaCut_;
+  double deltaRCut_;
+  double dEdxCut_;
 };
 
 //
@@ -109,8 +118,13 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet &iConfig)
       tracks_(iConfig.getUntrackedParameter<std::string>("tracks",
                                                          "generalTracks")),
       dEdxEstimator_(iConfig.getUntrackedParameter<std::string>(
-          "dEdxEstimator", "dedxHarmonic2")) {
-
+          "dEdxEstimator", "dedxHarmonic2")),
+      nFoundHitsCut_(
+          iConfig.getUntrackedParameter<unsigned int>("nFoundHitsCut", 0)),
+      chi2Cut_(iConfig.getUntrackedParameter<double>("chi2Cut", infinity)),
+      etaCut_(iConfig.getUntrackedParameter<double>("etaCut", infinity)),
+      deltaRCut_(iConfig.getUntrackedParameter<double>("deltaRCut", 100)),
+      dEdxCut_(iConfig.getUntrackedParameter<double>("dEdxCut", -1)) {
   // now do what ever initialization is needed
   edm::Service<TFileService> fs;
   tree_ = fs->make<TTree>("Tree", "Tree");
@@ -146,11 +160,11 @@ DemoAnalyzer::~DemoAnalyzer() {
 void DemoAnalyzer::analyze(const edm::Event &iEvent,
                            const edm::EventSetup &iSetup) {
   edm::Handle<reco::TrackCollection> tracks;
-  iEvent.getByLabel("MyTracks", tracks);
+  iEvent.getByLabel(tracks_, tracks);
   edm::Handle<edm::ValueMap<reco::DeDxData>> dEdxTrackHandle;
   iEvent.getByLabel(dEdxEstimator_, dEdxTrackHandle);
   const edm::ValueMap<reco::DeDxData> dEdxTrack = *dEdxTrackHandle.product();
-  nTracks_ = tracks->size();
+  nTracks_ = 0;
   dEdx_.clear();
   nHits_.clear();
   nLostHits_.clear();
@@ -167,75 +181,83 @@ void DemoAnalyzer::analyze(const edm::Event &iEvent,
   deltaEta_.clear();
   deltaPhi_.clear();
   for (unsigned int i = 0; i < tracks->size(); i++) {
-    nHits_.push_back(tracks->at(i).found() + tracks->at(i).lost());
-    nLostHits_.push_back(tracks->at(i).lost());
-    nFoundHits_.push_back(tracks->at(i).found());
-    charge_.push_back(tracks->at(i).charge());
-    chi2_.push_back(tracks->at(i).chi2());
-    ndof_.push_back(tracks->at(i).ndof());
-    reco::TrackRef track = reco::TrackRef(tracks, i);
-    // Track momentum is given by:
-    // track->p();
-    // You can access dE/dx Estimation of your track with:
-    // dEdxTrack[track].numberOfSaturatedMeasurements();
-    dEdx_.push_back(dEdxTrack[track].dEdx());
-    p_.push_back(track->p());
-    nDEdxMeasurements_.push_back(dEdxTrack[track].numberOfMeasurements());
-    edm::Handle<reco::GenParticleCollection> genParticles;
-    iEvent.getByLabel("genParticles", genParticles);
-    double deltaR = 100;
-    double deltaEta = 100;
-    double deltaPhi = 100;
-    int pID = 0;
-    for (unsigned int j = 0; j < genParticles->size(); ++j) {
-      const reco::GenParticle &p = (*genParticles)[j];
-      if ((p.status() == 1) && (p.charge() != 0)) {
-        if (std::sqrt(std::pow((tracks->at(i).eta() - p.eta()), 2) +
-                      std::pow(fmod(std::abs(tracks->at(i).phi() - p.phi()),
-                                    (4 * atan(1))),
-                               2)) < deltaR) {
-          deltaR =
-              std::sqrt(std::pow((tracks->at(i).eta() - p.eta()), 2) +
+    if ((std::abs(tracks->at(i).eta()) < etaCut_) &&
+        (tracks->at(i).found() >= nFoundHitsCut_) &&
+        ((tracks->at(i).chi2() / tracks->at(i).ndof()) < chi2Cut_) &&
+        (dEdxTrack[reco::TrackRef(tracks, i)].dEdx() > dEdxCut_)) {
+      nTracks_++;
+      nHits_.push_back(tracks->at(i).found() + tracks->at(i).lost());
+      nLostHits_.push_back(tracks->at(i).lost());
+      nFoundHits_.push_back(tracks->at(i).found());
+      charge_.push_back(tracks->at(i).charge());
+      chi2_.push_back(tracks->at(i).chi2());
+      ndof_.push_back(tracks->at(i).ndof());
+      reco::TrackRef track = reco::TrackRef(tracks, i);
+      // Track momentum is given by:
+      // track->p();
+      // You can access dE/dx Estimation of your track with:
+      // dEdxTrack[track].numberOfSaturatedMeasurements();
+      dEdx_.push_back(dEdxTrack[track].dEdx());
+      p_.push_back(track->p());
+      nDEdxMeasurements_.push_back(dEdxTrack[track].numberOfMeasurements());
+      edm::Handle<reco::GenParticleCollection> genParticles;
+      iEvent.getByLabel("genParticles", genParticles);
+      double deltaR = 100;
+      double deltaEta = 100;
+      double deltaPhi = 100;
+      int pID = 0;
+      for (unsigned int j = 0; j < genParticles->size(); ++j) {
+        const reco::GenParticle &p = (*genParticles)[j];
+        if ((p.status() == 1) && (p.charge() != 0)) {
+          if (std::sqrt(std::pow((tracks->at(i).eta() - p.eta()), 2) +
                         std::pow(fmod(std::abs(tracks->at(i).phi() - p.phi()),
                                       (4 * atan(1))),
-                                 2));
-          deltaEta = std::abs(tracks->at(i).eta() - p.eta());
-          deltaPhi =
-              fmod(std::abs(tracks->at(i).phi() - p.phi()), (4 * atan(1)));
+                                 2)) < deltaR) {
+            deltaR =
+                std::sqrt(std::pow((tracks->at(i).eta() - p.eta()), 2) +
+                          std::pow(fmod(std::abs(tracks->at(i).phi() - p.phi()),
+                                        (4 * atan(1))),
+                                   2));
+            deltaEta = std::abs(tracks->at(i).eta() - p.eta());
+            deltaPhi =
+                fmod(std::abs(tracks->at(i).phi() - p.phi()), (4 * atan(1)));
 
-          pID = p.pdgId();
+            pID = p.pdgId();
+          }
+          //    int id = p.pdgId();
+          //    int st = p.status();
+          //    const reco::Candidate *mom = p.mother();
+          //    double pt = p.pt(), eta = p.eta(), phi = p.phi(), mass =
+          //    p.mass();
+          //    double vx = p.vx(), vy = p.vy(), vz = p.vz();
+          //    int charge = p.charge();
+          //    int n = p.numberOfDaughters();
+          //    for (int j = 0; j < n; ++j) {
+          //      const reco::Candidate *d = p.daughter(j);
+          //      int dauId = d->pdgId();
+          //    }
         }
-        //    int id = p.pdgId();
-        //    int st = p.status();
-        //    const reco::Candidate *mom = p.mother();
-        //    double pt = p.pt(), eta = p.eta(), phi = p.phi(), mass =
-        //    p.mass();
-        //    double vx = p.vx(), vy = p.vy(), vz = p.vz();
-        //    int charge = p.charge();
-        //    int n = p.numberOfDaughters();
-        //    for (int j = 0; j < n; ++j) {
-        //      const reco::Candidate *d = p.daughter(j);
-        //      int dauId = d->pdgId();
-        //    }
       }
-    }
-    deltaR_.push_back(deltaR);
-    deltaEta_.push_back(deltaEta);
-    deltaPhi_.push_back(deltaPhi);
-    if (deltaR < 0.02)
-      particleID_.push_back(pID);
-    else
-      particleID_.push_back(0);
-    deltaR = 100;
-    pID = 0;
+      deltaR_.push_back(deltaR);
+      deltaEta_.push_back(deltaEta);
+      deltaPhi_.push_back(deltaPhi);
+      if (deltaR < deltaRCut_)
+        particleID_.push_back(pID);
+      else
+        particleID_.push_back(0);
+      deltaR = 100;
+      pID = 0;
 
-    for (unsigned int j = 0; j < tracks->at(i).found(); j++) {
-      if (tracks->at(i).recHit(j)->detUnit()->type().isTrackerPixel()) {
-        std::cout << "Pixel" << std::endl;
-      }
-      if (tracks->at(i).recHit(j)->detUnit()->type().isTrackerStrip()) {
-        std::cout << "Strip" << std::endl;
-      }
+      //      for (unsigned int j = 0; j < tracks->at(i).found(); j++) {
+      //        if (tracks->at(i).recHit(j)->detUnit()->type().isTrackerPixel())
+      //        {
+      //          std::cout << "Pixel" << std::endl;
+      //        }
+      //        if (tracks->at(i).recHit(j)->detUnit()->type().isTrackerStrip())
+      //        {
+      //          std::cout << "Strip" << std::endl;
+      //        }
+      //      }
     }
   }
 

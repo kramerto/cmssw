@@ -16,16 +16,21 @@ process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(-1) )
 process.source = cms.Source("PoolSource",
     # replace 'myfile.root' with the source file you want to use
     fileNames = cms.untracked.vstring(
-        #'file:/afs/cern.ch/cms/Tutorials/TWIKI_DATA/TTJets_8TeV_53X.root'
-        'file:myOutputFile.root'
+        'file:/afs/cern.ch/cms/Tutorials/TWIKI_DATA/TTJets_8TeV_53X.root'
+#         'file:myOutputFile.root'
     )
 )
 
 process.load("Demo.DemoAnalyzer.CfiFile_cfi")
 process.demo.minTracks=0
-process.demo.tracks='MyTracks'
+process.demo.tracks='generalTracks'
 process.demo.dEdxEstimator='dedxHarmonic2'
-#process.producer.generalTracks='generalTracks'
+process.demo.nFoundHitsCut=0
+process.demo.etaCut=1.4
+process.demo.chi2Cut=3
+process.demo.deltaRCut=0.01
+process.demo.dEdxCut=0
+# process.producer.generalTracks='generalTracks'
 
 #process.dump=cms.EDAnalyzer('EventContentAnalyzer')
 
@@ -42,4 +47,4 @@ process.TFileService = cms.Service("TFileService",
 
 process.p = cms.Path(process.demo)
 
-#process.e = cms.EndPath(process.out)
+# process.e = cms.EndPath(process.out)
