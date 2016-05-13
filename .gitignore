@@ -4,3 +4,11 @@ __init__.py
 .#*
 #*#
 *~
+*eps
+*txt
+*root
+*png
+*pdf
+.*
+\#*
+settings.xml
